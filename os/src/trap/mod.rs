@@ -50,7 +50,8 @@ pub fn trap_handler(cx: &mut TrapContext) -> &mut TrapContext {
     let stval = stval::read(); // get extra value
                                // trace!("into {:?}", scause.cause());
     match scause.cause() {
-        Trap::Exception(Exception::UserEnvCall) => {
+        Trap::Exception(Exception::UserEnvCall) => { // 这里进入系统调用
+            
             // jump to next instruction anyway
             cx.sepc += 4;
             // get system call return value
