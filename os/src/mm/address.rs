@@ -95,6 +95,7 @@ impl From<VirtPageNum> for usize {
 /// virtual address impl
 impl VirtAddr {
     /// Get the (floor) virtual page number
+    /// 返回虚拟地址所属的虚拟页号
     pub fn floor(&self) -> VirtPageNum {
         VirtPageNum(self.0 / PAGE_SIZE)
     }
