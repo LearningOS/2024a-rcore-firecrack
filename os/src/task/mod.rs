@@ -16,6 +16,7 @@ mod task;
 
 use crate::config::MAX_SYSCALL_NUM;
 use crate::loader::{get_app_data, get_num_app};
+use crate::mm::{VirtAddr, MapPermission};
 use crate::sync::UPSafeCell;
 use crate::timer::get_time_ms;
 use crate::trap::TrapContext;
@@ -172,6 +173,45 @@ impl TaskManager {
         let current = inner.current_task;
         inner.tasks[current].syscall_times[syscall_id] += 1;
     }
+    fn mmap(&self, _start: usize, _len: usize, _port:usize) -> bool{
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        let start_va = VirtAddr::from(_start);
+        let end_va = VirtAddr::from(_start + _len);
+        // 检查是否被映射
+        if inner.tasks[current].memory_set.check_area_mapped(start_va, end_va) {
+            return false;
+        }
+        // 构建permission
+        let mut map_perm = MapPermission::U;
+        if _port & 0x1 != 0 {
+            map_perm |= MapPermission::R;
+        }
+        if _port & 0x2 != 0 {
+            map_perm |= MapPermission::W;
+        }
+        if _port & 0x4 != 0 {
+            map_perm |= MapPermission::X;
+        }
+        // 映射
+        inner.tasks[current].memory_set.insert_framed_area(start_va, end_va, map_perm);
+        true
+    }
+    fn munmap(&self, _start: usize, _len: usize) -> bool {
+        // 因为在mmap时是创建了一个[_start, _start+_len) 的 Area，所以直接munmap 回收时直接回收整个Area
+        
+        // 这里没考虑回收部分内存的情况
+        let start_va = VirtAddr::from(_start);
+        let end_va = VirtAddr::from(_start + _len);
+        let start_vpn = start_va.floor();
+        let end_vpn = end_va.ceil();
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        if inner.tasks[current].memory_set.has_unmapped_vpn(start_va, end_va) {
+            return false;
+        }
+        inner.tasks[current].memory_set.drop_area(start_vpn, end_vpn)
+    }
 }
 
 /// Run the first task in task list.
@@ -233,4 +273,14 @@ pub fn get_start_time() -> usize {
 /// 增加一次系统调用次数
 pub fn add_syscall_times(id: usize) {
     TASK_MANAGER.add_syscall_times(id)
+}
+
+///在当前task 的用户空间执行mmap
+pub fn mmap_current(_start: usize, _len: usize, _port: usize) -> bool {
+    TASK_MANAGER.mmap(_start, _len, _port)
+}
+
+/// 取消当前task对start的映射
+pub fn munmap_current(_start: usize, _len: usize) -> bool {
+    TASK_MANAGER.munmap(_start, _len)
 }

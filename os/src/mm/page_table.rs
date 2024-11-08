@@ -108,6 +108,7 @@ impl PageTable {
         result
     }
     /// Find PageTableEntry by VirtPageNum
+    /// 返回的pte, 可能是无效的
     fn find_pte(&self, vpn: VirtPageNum) -> Option<&mut PageTableEntry> {
         let idxs = vpn.indexes();
         let mut ppn = self.root_ppn;
@@ -140,6 +141,7 @@ impl PageTable {
         *pte = PageTableEntry::empty();
     }
     /// get the page table entry from the virtual page number
+    /// 返回PTE/None
     pub fn translate(&self, vpn: VirtPageNum) -> Option<PageTableEntry> {
         self.find_pte(vpn).map(|pte| *pte)
     }

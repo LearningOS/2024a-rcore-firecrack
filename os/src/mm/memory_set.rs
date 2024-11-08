@@ -52,6 +52,7 @@ impl MemorySet {
         self.page_table.token()
     }
     /// Assume that no conflicts.
+    /// 将[start_va, end_va)虚拟空间分配出去
     pub fn insert_framed_area(
         &mut self,
         start_va: VirtAddr,
@@ -262,6 +263,49 @@ impl MemorySet {
             false
         }
     }
+    /// 检查[start_va, end_va)之间是否有被映射的虚拟页
+    pub fn check_area_mapped(&self, start_va: VirtAddr, end_va: VirtAddr) -> bool{
+        let start_vpn: VirtPageNum = start_va.floor();
+        let end_vpn: VirtPageNum = end_va.ceil();
+        for vpn in VPNRange::new(start_vpn, end_vpn) {
+            if self.has_mapped(vpn) { // vpn 已被映射
+                return true;
+            }
+        }
+        false
+    }
+    /// 检查[start_va, end_va)之间是否存在未被映射的虚拟页
+    pub fn has_unmapped_vpn(&self, start_va: VirtAddr, end_va: VirtAddr) -> bool {
+        let start_vpn: VirtPageNum = start_va.floor();
+        let end_vpn: VirtPageNum = end_va.ceil();
+        for vpn in VPNRange::new(start_vpn, end_vpn) {
+            if !self.has_mapped(vpn) {
+                return true;
+            }
+        }
+        false
+    }
+    /// 回收[start_vpn, end_vpn]页, 参考了ch5实现
+    pub fn drop_area(&mut self, start_vpn : VirtPageNum, end_vpn: VirtPageNum) -> bool{
+        if let Some((idx, area)) = self
+            .areas
+            .iter_mut()
+            .enumerate()
+            .find(|(_, area)| area.vpn_range.get_start() == start_vpn && area.vpn_range.get_end() == end_vpn) 
+        {
+            area.unmap(&mut self.page_table);
+            self.areas.remove(idx);
+            return true;
+        }
+        false
+    }
+    /// 检查vpn是否被映射至物理页
+    pub fn has_mapped(&self, vpn:VirtPageNum) ->bool {
+        if let Some(pte) = self.page_table.translate(vpn) {
+            return pte.is_valid();
+        }
+        false
+    }
 }
 /// map area structure, controls a contiguous piece of virtual memory
 pub struct MapArea {
@@ -287,9 +331,10 @@ impl MapArea {
             map_perm,
         }
     }
+    /// 建立一个vpn到ppn的映射，同时分配物理帧
     pub fn map_one(&mut self, page_table: &mut PageTable, vpn: VirtPageNum) {
         let ppn: PhysPageNum;
-        match self.map_type {
+        match self.map_type { // 分配物理内存
             MapType::Identical => {
                 ppn = PhysPageNum(vpn.0);
             }
@@ -300,15 +345,16 @@ impl MapArea {
             }
         }
         let pte_flags = PTEFlags::from_bits(self.map_perm.bits).unwrap();
-        page_table.map(vpn, ppn, pte_flags);
+        page_table.map(vpn, ppn, pte_flags);// 建立一个新的页表项
     }
     #[allow(unused)]
     pub fn unmap_one(&mut self, page_table: &mut PageTable, vpn: VirtPageNum) {
-        if self.map_type == MapType::Framed {
+        if self.map_type == MapType::Framed {// 这里会回收物理帧
             self.data_frames.remove(&vpn);
         }
-        page_table.unmap(vpn);
+        page_table.unmap(vpn); // 接触vpn 到 ppn的映射
     }
+    /// 将这个virtualArea 加入页表，并分配相应的物理帧
     pub fn map(&mut self, page_table: &mut PageTable) {
         for vpn in self.vpn_range {
             self.map_one(page_table, vpn);

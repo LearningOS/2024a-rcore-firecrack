@@ -2,10 +2,10 @@
 use crate::{
     config::MAX_SYSCALL_NUM,
     task::{
-        change_program_brk, exit_current_and_run_next, suspend_current_and_run_next, TaskStatus, current_user_token, get_syscall_times, get_start_time
+        change_program_brk, exit_current_and_run_next, suspend_current_and_run_next, TaskStatus, current_user_token, get_syscall_times, get_start_time, mmap_current, munmap_current
     },
-    mm::copy_to_user,
-    timer::{get_time_us, get_time_ms},
+    mm::{copy_to_user, VirtAddr},
+    timer::{get_time_us, get_time_ms}, 
 };
 
 #[repr(C)]
@@ -72,13 +72,32 @@ pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
 
 // YOUR JOB: Implement mmap.
 pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
-    trace!("kernel: sys_mmap NOT IMPLEMENTED YET!");
+    // _start 是一个虚拟地址
+    if !VirtAddr::from(_start).aligned() { // 没有对齐
+        return -1;
+    }
+    if _port & !0x7 != 0 || _port & 0x7 ==0 {
+        return -1;
+    }
+    
+    if mmap_current(_start, _len, _port) {
+        return 0
+    }
     -1
 }
 
 // YOUR JOB: Implement munmap.
 pub fn sys_munmap(_start: usize, _len: usize) -> isize {
     trace!("kernel: sys_munmap NOT IMPLEMENTED YET!");
+    // _start 是一个虚拟地址
+    if !VirtAddr::from(_start).aligned() { // 没有对齐
+        info!("sys_mmap: _start not aligned");
+        return -1;
+    }
+    if munmap_current(_start, _len) {
+        return 0;
+    }
+    info!("sys_munmap: munmap error!");
     -1
 }
 /// change data segment size
