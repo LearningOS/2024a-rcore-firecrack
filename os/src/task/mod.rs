@@ -198,9 +198,6 @@ impl TaskManager {
         true
     }
     fn munmap(&self, _start: usize, _len: usize) -> bool {
-        // 因为在mmap时是创建了一个[_start, _start+_len) 的 Area，所以直接munmap 回收时直接回收整个Area
-        
-        // 这里没考虑回收部分内存的情况
         let start_va = VirtAddr::from(_start);
         let end_va = VirtAddr::from(_start + _len);
         let start_vpn = start_va.floor();
