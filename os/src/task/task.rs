@@ -1,7 +1,7 @@
 //! Types related to task management & Functions for completely changing TCB
 use super::TaskContext;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
-use crate::config::TRAP_CONTEXT_BASE;
+use crate::config::{TRAP_CONTEXT_BASE, MAX_SYSCALL_NUM};
 use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
 use crate::trap::{trap_handler, TrapContext};
@@ -68,6 +68,15 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+
+    /// 第一次运行时间(单位毫秒)
+    pub start_time: usize,
+    /// 系统调用次数
+    pub syscall_times: [u32; MAX_SYSCALL_NUM],
+    /// 累计行程
+    pub stride: usize,
+    /// 步长 = BIG_STRID / priority
+    pub pass: usize,
 }
 
 impl TaskControlBlockInner {
@@ -93,7 +102,9 @@ impl TaskControlBlock {
     /// At present, it is only used for the creation of initproc
     pub fn new(elf_data: &[u8]) -> Self {
         // memory_set with elf program headers/trampoline/trap context/user stack
+        // 根据ELF文件构建mem_set, 用户栈user_sp， 和程序入口
         let (memory_set, user_sp, entry_point) = MemorySet::from_elf(elf_data);
+        // 获取trap 在用户空间的物理页
         let trap_cx_ppn = memory_set
             .translate(VirtAddr::from(TRAP_CONTEXT_BASE).into())
             .unwrap()
@@ -118,11 +129,15 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    start_time: 0,
+                    syscall_times: [0; MAX_SYSCALL_NUM],
+                    stride: 0,
+                    pass: 16,
                 })
             },
         };
         // prepare TrapContext in user space
-        let trap_cx = task_control_block.inner_exclusive_access().get_trap_cx();
+        let trap_cx = task_control_block.inner_exclusive_access().get_trap_cx(); // 一个指向用户空间trap对应的物理页的指针
         *trap_cx = TrapContext::app_init_context(
             entry_point,
             user_sp,
@@ -191,6 +206,10 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    start_time: 0,
+                    syscall_times: [0; MAX_SYSCALL_NUM],
+                    stride: 0,
+                    pass: 16,
                 })
             },
         });

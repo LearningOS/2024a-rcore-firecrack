@@ -7,7 +7,9 @@
 use super::__switch;
 use super::{fetch_task, TaskStatus};
 use super::{TaskContext, TaskControlBlock};
+use crate::mm::{MapPermission, VirtAddr};
 use crate::sync::UPSafeCell;
+use crate::timer::get_time_ms;
 use crate::trap::TrapContext;
 use alloc::sync::Arc;
 use lazy_static::*;
@@ -55,10 +57,14 @@ lazy_static! {
 pub fn run_tasks() {
     loop {
         let mut processor = PROCESSOR.exclusive_access();
-        if let Some(task) = fetch_task() {
+        if let Some(task) = fetch_task() { // 从就绪队列中取一个任务
             let idle_task_cx_ptr = processor.get_idle_task_cx_ptr();
             // access coming task TCB exclusively
             let mut task_inner = task.inner_exclusive_access();
+            if task_inner.start_time == 0 { // 用户程序第一次被调度
+                task_inner.start_time = get_time_ms();
+            }
+            task_inner.stride += task_inner.pass; // 更新行程
             let next_task_cx_ptr = &task_inner.task_cx as *const TaskContext;
             task_inner.task_status = TaskStatus::Running;
             // release coming task_inner manually
@@ -108,4 +114,35 @@ pub fn schedule(switched_task_cx_ptr: *mut TaskContext) {
     unsafe {
         __switch(switched_task_cx_ptr, idle_task_cx_ptr);
     }
+}
+/// 当前进程的系统调用次数加1
+pub fn add_syscall_times(id: usize) {
+    current_task()
+    .unwrap()
+    .inner_exclusive_access()
+    .syscall_times[id] += 1;
+}
+
+/// 给当前进程映射申请一块虚拟内存从[start_va, end_va)
+pub fn map_an_area(start_va: VirtAddr, end_va: VirtAddr, flag : MapPermission) -> isize {
+    let start_vpn = start_va.floor();
+    let end_vpn = end_va.ceil();
+    let task = current_task().unwrap();
+    let mut inner = task.inner_exclusive_access();
+    if inner.memory_set.have_any_mapped(start_vpn, end_vpn) {
+        return -1;
+    }
+    inner.memory_set.insert_framed_area(start_va, end_va, flag);
+    0
+}
+/// 当前进程回收一块虚拟内存[start_va, end_va)
+pub fn unmap_an_area(start_va: VirtAddr, end_va: VirtAddr) -> isize {
+    let start_vpn = start_va.floor();
+    let end_vpn = end_va.ceil();
+    let task = current_task().unwrap();
+    let mut inner = task.inner_exclusive_access();
+    if inner.memory_set.have_any_unmapped(start_vpn, end_vpn) {
+        return -1;
+    }
+    inner.memory_set.drop_area(start_vpn, end_vpn)
 }

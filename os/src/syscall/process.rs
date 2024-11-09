@@ -2,13 +2,14 @@
 use alloc::sync::Arc;
 
 use crate::{
-    config::MAX_SYSCALL_NUM,
+    config::{MAX_SYSCALL_NUM, BIG_STRID},
     loader::get_app_data_by_name,
-    mm::{translated_refmut, translated_str},
+    mm::{translated_refmut, translated_str, copy_to_user, VirtAddr, MapPermission},
     task::{
         add_task, current_task, current_user_token, exit_current_and_run_next,
-        suspend_current_and_run_next, TaskStatus,
+        suspend_current_and_run_next, TaskStatus, TaskControlBlock, map_an_area, unmap_an_area
     },
+    timer::{get_time_ms, get_time_us},
 };
 
 #[repr(C)]
@@ -118,40 +119,61 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
 pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+    let us = get_time_us();
+    let tv = TimeVal {
+        sec: us / 1_000_000,
+        usec: us % 1_000_000,
+    };
+    copy_to_user(current_user_token(), _ts as *mut u8, &tv as *const TimeVal as *const u8, core::mem::size_of::<TimeVal>());
+    0
 }
 
 /// YOUR JOB: Finish sys_task_info to pass testcases
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TaskInfo`] is splitted by two pages ?
 pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_task_info NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+    let info = TaskInfo {
+        status: TaskStatus::Running,
+        syscall_times: current_task().unwrap().inner_exclusive_access().syscall_times,
+        time: get_time_ms() - current_task().unwrap().inner_exclusive_access().start_time,
+    };
+    copy_to_user(current_user_token(), _ti as *mut u8, &info as *const TaskInfo as *const u8, core::mem::size_of::<TaskInfo>());
+    0
 }
 
 /// YOUR JOB: Implement mmap.
 pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_mmap NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+    // _start 是一个虚拟地址
+    if !VirtAddr::from(_start).aligned() { // 没有对齐
+        return -1;
+    }
+    if _port & !0x7 != 0 || _port & 0x7 ==0 {
+        return -1;
+    }
+
+    // 构建permission
+    let mut map_perm = MapPermission::U;
+    if _port & 0x1 != 0 {
+        map_perm |= MapPermission::R;
+    }
+    if _port & 0x2 != 0 {
+        map_perm |= MapPermission::W;
+    }
+    if _port & 0x4 != 0 {
+        map_perm |= MapPermission::X;
+    }
+
+    map_an_area(_start.into(), (_start + _len).into(), map_perm)
+
 }
 
 /// YOUR JOB: Implement munmap.
 pub fn sys_munmap(_start: usize, _len: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_munmap NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+    // _start 是一个虚拟地址
+    if !VirtAddr::from(_start).aligned() { // 没有对齐
+        return -1;
+    }
+    unmap_an_area(_start.into(), (_start + _len).into())
 }
 
 /// change data segment size
@@ -171,7 +193,25 @@ pub fn sys_spawn(_path: *const u8) -> isize {
         "kernel:pid[{}] sys_spawn NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+     // 仿造sys_exec 拿到elf 文件数据
+    let token = current_user_token();
+    let path = translated_str(token, _path);
+    if let Some(data) = get_app_data_by_name(path.as_str()) {
+        // 直接借助TaskControlBlock::new 根据elf 创建进程块
+        let new_task = Arc::new(TaskControlBlock::new(data));
+        // 默认parent 是 None, 需要修改一下
+        new_task.inner_exclusive_access().parent = Some(Arc::downgrade(&(current_task().unwrap())));
+        // 添加到父进程
+        current_task().unwrap()
+        .inner_exclusive_access()
+        .children.push(new_task.clone());
+        // 添加到就绪队列
+        add_task(new_task.clone());
+        let pid = new_task.pid.0 as isize;
+        pid
+    } else {
+        -1
+    }
 }
 
 // YOUR JOB: Set task priority.
@@ -180,5 +220,9 @@ pub fn sys_set_priority(_prio: isize) -> isize {
         "kernel:pid[{}] sys_set_priority NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    if _prio < 2 {
+        return -1;
+    }
+    current_task().unwrap().inner_exclusive_access().pass = BIG_STRID / _prio as usize;
+    _prio
 }
