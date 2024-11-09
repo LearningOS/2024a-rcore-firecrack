@@ -4,13 +4,13 @@ use alloc::sync::Arc;
 use lazy_static::*;
 use spin::Mutex;
 /// Cached block inside memory
-pub struct BlockCache {
+pub struct BlockCache {// 一个BlockCache 对应 块设备中的一块数据
     /// cached block data
     cache: [u8; BLOCK_SZ],
     /// underlying block id
     block_id: usize,
     /// underlying block device
-    block_device: Arc<dyn BlockDevice>,
+    block_device: Arc<dyn BlockDevice>, // 持有一个对块设备的引用
     /// whether the block is dirty
     modified: bool,
 }
@@ -31,7 +31,7 @@ impl BlockCache {
     fn addr_of_offset(&self, offset: usize) -> usize {
         &self.cache[offset] as *const _ as usize
     }
-
+    /// 返回对块缓冲区中offset处数据的引用
     pub fn get_ref<T>(&self, offset: usize) -> &T
     where
         T: Sized,
@@ -103,7 +103,7 @@ impl BlockCacheManager {
                     .queue
                     .iter()
                     .enumerate()
-                    .find(|(_, pair)| Arc::strong_count(&pair.1) == 1)
+                    .find(|(_, pair)| Arc::strong_count(&pair.1) == 1) // 引用数为1 表明该块只被管理器持有
                 {
                     self.queue.drain(idx..=idx);
                 } else {
