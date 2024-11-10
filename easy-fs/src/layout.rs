@@ -75,14 +75,14 @@ pub enum DiskInodeType {
 }
 
 /// A indirect block
-type IndirectBlock = [u32; BLOCK_SZ / 4];
+type IndirectBlock = [u32; BLOCK_SZ / 4]; // 一个间接块存储128个数据块编号
 /// A data block
 type DataBlock = [u8; BLOCK_SZ];
 /// A disk inode
 #[repr(C)]
 pub struct DiskInode {
-    pub size: u32,
-    pub direct: [u32; INODE_DIRECT_COUNT],
+    pub size: u32, // 总字节数
+    pub direct: [u32; INODE_DIRECT_COUNT], // 默认28个直接访问块
     pub indirect1: u32,
     pub indirect2: u32,
     type_: DiskInodeType,
@@ -390,7 +390,7 @@ impl DiskInode {
 }
 /// A directory entry
 #[repr(C)]
-pub struct DirEntry {
+pub struct DirEntry { // 一条目录项就是文件名和对应ID
     name: [u8; NAME_LENGTH_LIMIT + 1],
     inode_id: u32,
 }

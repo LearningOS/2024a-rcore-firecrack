@@ -112,6 +112,8 @@ impl Inode {
             .modify(new_inode_block_offset, |new_inode: &mut DiskInode| {
                 new_inode.initialize(DiskInodeType::File);
             });
+
+        // 修改目录块， 写入一条目录项
         self.modify_disk_inode(|root_inode| {
             // append file in the dirent
             let file_count = (root_inode.size as usize) / DIRENT_SZ;
@@ -182,5 +184,87 @@ impl Inode {
             }
         });
         block_cache_sync_all();
+    }
+    /// 获取inode_id
+    pub fn get_inode_id(&self) -> u64 {
+        let fs = self.fs.lock();
+        fs.get_inode_id_by_block_id(self.block_id, self.block_offset) as u64
+    }
+    /// 用于根目录查询node_id节点的链接数量
+    pub fn get_link_num(&self, node_id: u64) -> u32 {
+        // 注意上锁
+        let _fs = self.fs.lock();
+        let mut ans = 0;
+        // 遍历目录项，仿照find_inode_id 编写即可
+        self.read_disk_inode(|root_disk| {
+            assert!(root_disk.is_dir());
+            let file_n = (root_disk.size as usize) / DIRENT_SZ ;
+            let mut dirent = DirEntry::empty();
+            for i in 0..file_n {
+                assert_eq!(
+                    root_disk.read_at(DIRENT_SZ * i, dirent.as_bytes_mut(), &self.block_device,),
+                    DIRENT_SZ,
+                );
+                if dirent.inode_id() == node_id as u32 {
+                    ans += 1;
+                }
+            }
+        });
+        ans
+    }
+    /// 用于根目录建立链接, 即创建一个目录条目, 参考create
+    pub fn link(&self, new_name: &str, node_id: u64) {
+        // 注意上锁
+        let mut fs = self.fs.lock();
+        
+        self.modify_disk_inode(|root_disk| {
+            assert!(root_disk.is_dir());
+            let file_n = (root_disk.size as usize) / DIRENT_SZ ;
+            let new_size = (file_n + 1) * DIRENT_SZ;
+            self.increase_size(new_size as u32, root_disk, &mut fs);
+            let dirent = DirEntry::new(new_name, node_id as u32);
+
+            root_disk.write_at(
+                file_n * DIRENT_SZ,
+                dirent.as_bytes(),
+                &self.block_device
+            )
+        });
+    }
+    /// 删除硬链接， 只被根节点调用
+    pub fn unlink(&self, path: &str) -> isize {
+        // 判断文件是否存在
+        if let Some(inode) = self.find(path) {
+            let node_id = inode.get_inode_id(); 
+            // 获取链接数
+            let linkn = self.get_link_num(node_id);
+            if linkn == 1 { // 这里要删除文件了
+                inode.clear();
+            }
+            // 链接数减1，这里取巧，将目录项的名字设为空
+            let mut _fs= self.fs.lock();
+            self.modify_disk_inode(|root_disk|{
+                let file_count = (root_disk.size as usize) / DIRENT_SZ;
+                let mut dirent = DirEntry::empty();
+                for i in 0..file_count {
+                    assert_eq!(
+                        root_disk.read_at(DIRENT_SZ * i, dirent.as_bytes_mut(), &self.block_device,),
+                        DIRENT_SZ,
+                    );
+                    if dirent.name() == path {
+                        root_disk.write_at(
+                            DIRENT_SZ * i,
+                            DirEntry::empty().as_bytes(),
+                            &self.block_device
+                        );
+                        break;
+                    }
+                }
+            });
+            0
+        } else {
+            return -1
+        }
+
     }
 }

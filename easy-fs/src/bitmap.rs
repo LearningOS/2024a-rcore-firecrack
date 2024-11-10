@@ -26,6 +26,7 @@ impl Bitmap {
         }
     }
     /// Allocate a new block from a block device
+    /// 返回一个索引节点编号/块编号
     pub fn alloc(&self, block_device: &Arc<dyn BlockDevice>) -> Option<usize> {
         for block_id in 0..self.blocks {
             let pos = get_block_cache(

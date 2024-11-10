@@ -318,6 +318,45 @@ impl MemorySet {
             false
         }
     }
+        /// 检查[start_vpn, end_vpn) 是的存在被映射的
+        pub fn have_any_mapped(&self, start_vpn: VirtPageNum, end_vpn: VirtPageNum) -> bool{
+            for vpn in VPNRange::new(start_vpn, end_vpn) {
+                if self.has_mapped(vpn) { // vpn 已被映射
+                    return true;
+                }
+            }
+            false
+        }
+        /// 检查[start_vpn, end_vpn)是否存在未被映射的
+        pub fn have_any_unmapped(&self, start_vpn: VirtPageNum, end_vpn: VirtPageNum) -> bool {
+            for vpn in VPNRange::new(start_vpn, end_vpn) {
+                if !self.has_mapped(vpn) {
+                    return true;
+                }
+            }
+            false
+        }
+        /// 检查vpn是否被映射至物理页
+        pub fn has_mapped(&self, vpn:VirtPageNum) ->bool {
+            if let Some(pte) = self.page_table.translate(vpn) {
+                return pte.is_valid();
+            }
+            false
+        }
+        /// 回收[start_vpn, end_vpn]页, 参考了ch5实现
+        pub fn drop_area(&mut self, start_vpn : VirtPageNum, end_vpn: VirtPageNum) -> isize {
+            if let Some((idx, area)) = self
+                .areas
+                .iter_mut()
+                .enumerate()
+                .find(|(_, area)| area.vpn_range.get_start() == start_vpn && area.vpn_range.get_end() == end_vpn) 
+            {
+                area.unmap(&mut self.page_table);
+                self.areas.remove(idx);
+                return 0;
+            }
+            -1
+        }
 }
 /// map area structure, controls a contiguous piece of virtual memory
 pub struct MapArea {
