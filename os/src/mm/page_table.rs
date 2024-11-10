@@ -274,3 +274,36 @@ impl Iterator for UserBufferIterator {
         }
     }
 }
+
+
+/// 将内核空间中的数据拷贝到用户空间中 src --> user_dst
+pub fn copy_to_user(token: usize, user_dst: *mut u8, src: *const u8, len: usize) -> isize {
+    let user_page_table = PageTable::from_token(token); // 获取用户页表
+    let mut start = user_dst as usize; // 用户虚拟地址空间中start 到end 必然是连续的
+    let end = start + len;
+    let mut start_src = src as usize;
+    while start < end {
+        let start_va = VirtAddr::from(start);
+        let mut vpn = start_va.floor();
+        // 得到对应物理页号，由于在内核空间中是直接映射，可以直接读取该物理页
+        let ppn = user_page_table.translate(vpn).unwrap().ppn();
+        vpn.step();
+        let mut end_va: VirtAddr = vpn.into(); // 下一页起始地址
+        end_va = end_va.min(VirtAddr::from(end)); // 本轮填充终点
+        let target;
+        if end_va.page_offset() == 0 { // 填充[start_va...]
+            target = &mut ppn.get_bytes_array()[start_va.page_offset()..];
+        } else {// 填充[start_va, end]
+            target = &mut ppn.get_bytes_array()[start_va.page_offset()..end_va.page_offset()];
+        }
+        // 开始复制
+        for i in 0..target.len() { // 已确保target.len() <= len
+            target[i] = unsafe {
+                *(start_src as *const u8)
+            };
+            start_src += 1;
+        }
+        start = end_va.into();
+    }
+    0
+}
