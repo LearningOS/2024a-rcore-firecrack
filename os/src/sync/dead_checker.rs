@@ -1,5 +1,5 @@
-const MAX_RESOURCE: usize = 32;
-const MAX_THREAD: usize = 32;
+const MAX_RESOURCE: usize = 30;
+const MAX_THREAD: usize = 20;
 
 /// 死锁检测器
 pub struct DeadChecker{
